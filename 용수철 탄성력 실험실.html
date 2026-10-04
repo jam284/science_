@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>용수철 탄성력 실험실</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        canvas {
+            touch-action: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between overflow-x-hidden">
+
+    <!-- Top Bar Header -->
+    <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 sm:px-6 shadow-lg">
+        <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-3">
+            <div class="flex items-center gap-3">
+                <div class="bg-amber-500/20 text-amber-400 p-2.5 rounded-xl border border-amber-500/30">
+                    <i class="fa-solid fa-arrows-left-right text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                        용수철 탄성력 실험실
+                    </h1>
+                    <p class="text-xs text-amber-400 font-semibold flex items-center gap-1.5 mt-0.5">
+                        <i class="fa-solid fa-hand-pointer animate-pulse"></i>
+                        손으로 용수철을 끌어당겨보세요!
+                    </p>
+                </div>
+            </div>
+
+            <!-- Top Utility Action Controls -->
+            <div class="flex items-center gap-2">
+                <button id="btnResetAll" class="px-4 py-2 bg-red-600/90 hover:bg-red-500 text-white text-xs sm:text-sm font-bold rounded-xl shadow-md border border-red-500/50 flex items-center gap-2 transition active:scale-95">
+                    <i class="fa-solid fa-rotate-right"></i>
+                    <span>초기화</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Experiment Canvas Viewport -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 flex flex-col gap-4 justify-center">
+
+        <!-- Canvas Container Box -->
+        <div class="relative bg-slate-900/80 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col min-h-[420px] sm:min-h-[500px]">
+            
+            <!-- Dynamic HTML5 Canvas -->
+            <div class="relative w-full flex-1">
+                <canvas id="expCanvas" class="w-full h-full cursor-grab active:cursor-grabbing block"></canvas>
+
+                <!-- Floating Readout Dashboard (Top Left) -->
+                <div class="absolute top-4 left-4 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 text-white p-4 rounded-2xl shadow-2xl flex flex-col gap-2.5 min-w-[210px] pointer-events-none">
+                    <div class="flex justify-between items-center gap-4 text-xs sm:text-sm">
+                        <span class="text-slate-400 font-medium">용수철 원래 길이:</span>
+                        <span class="font-bold text-amber-400">4.0 cm</span>
+                    </div>
+                    <div class="flex justify-between items-center gap-4 text-xs sm:text-sm">
+                        <span class="text-slate-400 font-medium">현재 전체 길이:</span>
+                        <span id="displayLength" class="font-black text-cyan-300 text-base sm:text-lg">4.0 cm</span>
+                    </div>
+                    <div class="flex justify-between items-center gap-4 text-xs sm:text-sm">
+                        <span class="text-slate-400 font-medium">늘어난 길이:</span>
+                        <span id="displayStretch" class="font-black text-emerald-400 text-base sm:text-lg">0.0 cm</span>
+                    </div>
+                    <div class="border-t border-slate-800 my-0.5"></div>
+                    <div class="flex justify-between items-center gap-4">
+                        <span class="text-slate-200 font-bold text-xs sm:text-sm">측정한 힘:</span>
+                        <span id="displayForce" class="font-black text-amber-300 text-2xl sm:text-3xl">0.00 N</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Simulation Logic Script -->
+    <script>
+        class SimpleSpringSimulation {
+            constructor() {
+                this.canvas = document.getElementById('expCanvas');
+                this.ctx = this.canvas.getContext('2d');
+
+                // Physics state
+                this.baseLength = 4.0; // cm (Resting length)
+                this.currentLength = 4.0; // cm
+                // 4cm 늘어났을 때 (총 8cm) 힘 2N (k = 0.5 N/cm)
+                this.k = 0.5; 
+                this.targetCheckpoints = [4.0, 8.0, 12.0, 16.0, 20.0, 24.0];
+
+                // Drag state
+                this.isDragging = false;
+                this.lastSnappedTarget = 4.0;
+
+                // Bind DOM Elements
+                this.initDomElements();
+
+                // Resize handler
+                this.resizeCanvas();
+                window.addEventListener('resize', () => this.resizeCanvas());
+
+                // Event Listeners
+                this.bindEvents();
+                this.bindDragEvents();
+
+                // Initial UI update
+                this.updateDisplays();
+
+                // Start Loop
+                requestAnimationFrame((t) => this.loop(t));
+            }
+
+            initDomElements() {
+                this.displayLength = document.getElementById('displayLength');
+                this.displayStretch = document.getElementById('displayStretch');
+                this.displayForce = document.getElementById('displayForce');
+                this.btnResetAll = document.getElementById('btnResetAll');
+            }
+
+            resizeCanvas() {
+                const rect = this.canvas.parentElement.getBoundingClientRect();
+                this.canvas.width = rect.width * (window.devicePixelRatio || 1);
+                this.canvas.height = rect.height * (window.devicePixelRatio || 1);
+                this.ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+                this.displayWidth = rect.width;
+                this.displayHeight = rect.height;
+            }
+
+            getPointerCm(clientX) {
+                const rect = this.canvas.getBoundingClientRect();
+                const x = clientX - rect.left;
+                const wallX = 60;
+                const maxCm = 26; // ruler scale up to 26cm
+                const rulerStartX = wallX;
+                const rulerWidth = this.displayWidth - wallX - 50;
+                const pxPerCm = rulerWidth / maxCm;
+                
+                let cm = (x - rulerStartX) / pxPerCm;
+                return Math.min(24.0, Math.max(4.0, cm));
+            }
+
+            bindDragEvents() {
+                const onStart = (clientX) => {
+                    this.isDragging = true;
+                    this.handlePointerMove(clientX);
+                };
+
+                const onMove = (clientX) => {
+                    if (!this.isDragging) return;
+                    this.handlePointerMove(clientX);
+                };
+
+                const onEnd = () => {
+                    this.isDragging = false;
+                };
+
+                // Mouse Events
+                this.canvas.addEventListener('mousedown', (e) => onStart(e.clientX));
+                window.addEventListener('mousemove', (e) => onMove(e.clientX));
+                window.addEventListener('mouseup', onEnd);
+
+                // Touch Events
+                this.canvas.addEventListener('touchstart', (e) => {
+                    if (e.touches.length > 0) {
+                        onStart(e.touches[0].clientX);
+                    }
+                }, { passive: true });
+
+                window.addEventListener('touchmove', (e) => {
+                    if (this.isDragging && e.touches.length > 0) {
+                        onMove(e.touches[0].clientX);
+                    }
+                }, { passive: true });
+
+                window.addEventListener('touchend', onEnd);
+            }
+
+            handlePointerMove(clientX) {
+                let rawCm = this.getPointerCm(clientX);
+                
+                // Magnetic snap threshold (0.4cm range)
+                const snapThreshold = 0.4;
+                let snappedCm = rawCm;
+                let isSnapped = false;
+
+                for (let i = 0; i < this.targetCheckpoints.length; i++) {
+                    const target = this.targetCheckpoints[i];
+                    if (Math.abs(rawCm - target) <= snapThreshold) {
+                        snappedCm = target;
+                        isSnapped = true;
+                        
+                        if (this.lastSnappedTarget !== target) {
+                            this.lastSnappedTarget = target;
+                        }
+                        break;
+                    }
+                }
+
+                if (!isSnapped) {
+                    this.lastSnappedTarget = null;
+                }
+
+                this.currentLength = snappedCm;
+                this.updateDisplays();
+            }
+
+            bindEvents() {
+                this.btnResetAll.addEventListener('click', () => {
+                    this.resetSimulation();
+                });
+            }
+
+            updateDisplays() {
+                const stretch = Math.max(0, this.currentLength - this.baseLength);
+                const force = stretch * this.k;
+
+                this.displayLength.textContent = `${this.currentLength.toFixed(1)} cm`;
+                this.displayStretch.textContent = `${stretch.toFixed(1)} cm`;
+                this.displayForce.textContent = `${force.toFixed(2)} N`;
+            }
+
+            resetSimulation() {
+                this.currentLength = 4.0;
+                this.updateDisplays();
+            }
+
+            loop() {
+                this.renderCanvas();
+                requestAnimationFrame(() => this.loop());
+            }
+
+            renderCanvas() {
+                const w = this.displayWidth;
+                const h = this.displayHeight;
+                const ctx = this.ctx;
+
+                ctx.clearRect(0, 0, w, h);
+
+                const wallX = 60;
+                const centerY = h * 0.45;
+                const maxCm = 26;
+                const rulerWidth = w - wallX - 50;
+                const pxPerCm = rulerWidth / maxCm;
+
+                // 1. Draw Ruler below spring
+                const rulerY = centerY + 70;
+                const rulerH = 65;
+
+                ctx.fillStyle = '#1e293b';
+                ctx.strokeStyle = '#334155';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(wallX, rulerY, rulerWidth, rulerH, 12);
+                ctx.fill();
+                ctx.stroke();
+
+                // Ruler Ticks and Labels
+                for (let cm = 0; cm <= maxCm; cm++) {
+                    const tickX = wallX + cm * pxPerCm;
+                    const isCheckpoint = this.targetCheckpoints.includes(cm);
+                    const isMajor = cm % 2 === 0;
+
+                    ctx.strokeStyle = isCheckpoint ? '#f59e0b' : (isMajor ? '#94a3b8' : '#475569');
+                    ctx.lineWidth = isCheckpoint ? 3 : (isMajor ? 2 : 1);
+
+                    const tickLen = isCheckpoint ? 24 : (isMajor ? 16 : 9);
+                    ctx.beginPath();
+                    ctx.moveTo(tickX, rulerY);
+                    ctx.lineTo(tickX, rulerY + tickLen);
+                    ctx.stroke();
+
+                    // Ruler Numbers
+                    if (isMajor || isCheckpoint) {
+                        ctx.fillStyle = isCheckpoint ? '#fbbf24' : '#cbd5e1';
+                        ctx.font = isCheckpoint ? 'bold 13px Inter' : '11px Inter';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(`${cm}`, tickX, rulerY + tickLen + 15);
+                    }
+                }
+
+                // Ruler Unit Label
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = 'bold 12px Inter';
+                ctx.textAlign = 'right';
+                ctx.fillText('(cm)', wallX + rulerWidth - 10, rulerY + rulerH - 10);
+
+                // 2. Draw Left Wall
+                ctx.fillStyle = '#334155';
+                ctx.fillRect(wallX - 25, centerY - 80, 25, 160);
+                
+                // Wall Hatching lines
+                ctx.strokeStyle = '#1e293b';
+                ctx.lineWidth = 2;
+                for (let y = centerY - 75; y < centerY + 75; y += 15) {
+                    ctx.beginPath();
+                    ctx.moveTo(wallX - 25, y + 10);
+                    ctx.lineTo(wallX - 10, y);
+                    ctx.stroke();
+                }
+
+                ctx.fillStyle = '#64748b';
+                ctx.fillRect(wallX - 4, centerY - 80, 4, 160);
+
+                // 3. Draw Spring
+                const springStartX = wallX;
+                const springEndX = wallX + this.currentLength * pxPerCm;
+                const springLengthPx = springEndX - springStartX;
+
+                const coils = 18;
+                const springRadius = 26;
+                ctx.strokeStyle = '#38bdf8';
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                ctx.beginPath();
+                ctx.moveTo(springStartX, centerY);
+
+                const leadIn = 15;
+                const leadOut = 15;
+                const coilLengthPx = springLengthPx - leadIn - leadOut;
+
+                ctx.lineTo(springStartX + leadIn, centerY);
+
+                for (let i = 0; i < coils; i++) {
+                    const step = coilLengthPx / coils;
+                    const x1 = springStartX + leadIn + step * (i + 0.25);
+                    const y1 = centerY - springRadius;
+                    const x2 = springStartX + leadIn + step * (i + 0.75);
+                    const y2 = centerY + springRadius;
+                    const x3 = springStartX + leadIn + step * (i + 1);
+                    const y3 = centerY;
+
+                    ctx.lineTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.lineTo(x3, y3);
+                }
+
+                ctx.lineTo(springEndX, centerY);
+                ctx.stroke();
+
+                // 4. Draw Hook & Force Gauge / Drag Handle at Spring End
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(springEndX + 15, centerY, 15, Math.PI * 0.75, Math.PI * 2.25);
+                ctx.stroke();
+
+                // Drag Ring Handle Graphic
+                const handleX = springEndX + 30;
+                ctx.fillStyle = this.isDragging ? '#f59e0b' : '#38bdf8';
+                ctx.beginPath();
+                ctx.roundRect(handleX, centerY - 25, 45, 50, 12);
+                ctx.fill();
+
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath();
+                ctx.roundRect(handleX + 10, centerY - 15, 25, 30, 8);
+                ctx.fill();
+
+                // Drag Arrow Hints inside Handle
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 16px FontAwesome';
+                ctx.textAlign = 'center';
+                ctx.fillText('↔', handleX + 22, centerY + 5);
+
+                // Vertical Line Indicator on Ruler
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(springEndX, centerY + springRadius + 5);
+                ctx.lineTo(springEndX, rulerY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+
+        // Initialize App on Window Load
+        window.onload = () => {
+            new SimpleSpringSimulation();
+        };
+    </script>
+</body>
+</html>
